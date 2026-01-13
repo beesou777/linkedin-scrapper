@@ -5,6 +5,10 @@
 **/build
 **/*.tgz
 
+# Environment variables
+.env
+!.env.example
+
 # General
 .DS_Store
 .AppleDouble
