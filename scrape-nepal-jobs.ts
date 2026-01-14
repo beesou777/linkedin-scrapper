@@ -250,7 +250,7 @@ async function insertJob(client: Client, job: any): Promise<boolean> {
     // Scrape ALL jobs - set very high limit (LinkedIn typically shows max 1000 results per search)
     // The scraper will stop automatically when no more jobs are available
     // Can be overridden with MAX_JOBS environment variable
-    const MAX_JOBS_TO_SCRAPE = process.env.MAX_JOBS ? parseInt(process.env.MAX_JOBS) : 10000;
+    const MAX_JOBS_TO_SCRAPE = 500;
     
     console.log(`🎯 Target: Scrape up to ${MAX_JOBS_TO_SCRAPE} jobs (will stop when no more available)\n`);
     console.log("⏱️  Speed: 500ms delay between actions (~2 requests/sec) to avoid rate limiting\n");
@@ -267,7 +267,7 @@ async function insertJob(client: Client, job: any): Promise<boolean> {
             locations: ["Nepal"],
             limit: MAX_JOBS_TO_SCRAPE, // High limit to get all jobs
             filters: {
-                time: timeFilter.WEEK, // Jobs posted within last 7 days
+                time: timeFilter.DAY, // Jobs posted within last 7 days
             }
         }
     }, {
