@@ -3,7 +3,7 @@ name: Scrape LinkedIn Jobs
 on:
   schedule:
     # Run daily at 6 AM UTC (11:45 AM Nepal time)
-    - cron: '0 6 * * *'
+    - cron: '5 3 * * *'
   workflow_dispatch: # Allow manual triggering
 
 jobs:
