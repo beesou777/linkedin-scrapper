@@ -370,12 +370,18 @@ export class AuthenticatedStrategy extends RunStrategy {
             waitUntil: 'load',
         });
 
-        // Set cookie
-        logger.info("Setting authentication cookie");
+        // Set cookie from configuration / environment
+        if (!config.LI_AT_COOKIE) {
+            logger.error("LI_AT_COOKIE is not set. Please define it in your environment or .env file.");
+            this.scraper.emit(events.scraper.invalidSession);
+            return { exit: true };
+        }
+
+        logger.info("Setting authentication cookie from LI_AT_COOKIE");
         await page.setCookie({
             name: "li_at",
-            value: "AQEDAWM_xr8EV6M-AAABm7aAkoIAAAGb2o0WglYAGOa1jBDRR6KxrRXvzvW9-NcWzBdZFU5VCKZ753e3FQ3C2TraRzYVn9bzJroiDrncE-HnDZziY1HWkFq6pnL833TzjI4eyka87BuNgVxPMVUmh7If",
-            domain: ".www.linkedin.com"
+            value: config.LI_AT_COOKIE,
+            domain: ".linkedin.com"
         });
 
         // Override start by the page offset

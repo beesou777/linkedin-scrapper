@@ -9,6 +9,7 @@ import {
 } from "./src/index";
 import * as fs from "fs";
 import { Client } from "pg";
+import { env } from "process";
 
 // Database helper functions
 async function getExistingJobIds(client: Client): Promise<Set<string>> {
@@ -70,7 +71,7 @@ async function insertJob(client: Client, job: any): Promise<boolean> {
     
     // Initialize database connection
     let dbClient: Client | null = null;
-    const databaseUrl = process.env.DATABASE_URL;
+    const databaseUrl = env.DATABASE_URL;
     let dbJobIds = new Set<string>();
     
     if (databaseUrl) {
@@ -197,7 +198,7 @@ async function insertJob(client: Client, job: any): Promise<boolean> {
 
     // Listen for invalid session
     scraper.on(events.scraper.invalidSession, () => {
-        console.error("Invalid session! Please check your LI_AT_COOKIE");
+        console.error("Invalid session! Please check your LI_AT_COOKIE",env.LI_AT_COOKIE);
     });
 
     // Listen for end event
@@ -240,7 +241,7 @@ async function insertJob(client: Client, job: any): Promise<boolean> {
 
     console.log("Starting to scrape LinkedIn jobs from Nepal (within last 7 days)...\n");
     
-    if (process.env.LI_AT_COOKIE) {
+    if (env.LI_AT_COOKIE) {
         console.log("✓ Using authenticated session\n");
     } else {
         console.log("⚠ Using anonymous session (may not work reliably)");
