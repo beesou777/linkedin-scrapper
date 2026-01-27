@@ -130,7 +130,7 @@ async function insertJob(client: Client, job: any): Promise<boolean> {
     // slowMo: 500ms = 2 requests per second max
     const scraper = new LinkedinScraper({
         headless: true,
-        slowMo: 500, // Increased to 500ms to avoid rate limiting (was 250ms)
+        slowMo: 1000, // Increased to 500ms to avoid rate limiting (was 250ms)
         args: [
             "--lang=en-US",
         ],
