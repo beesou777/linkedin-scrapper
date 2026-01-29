@@ -130,7 +130,7 @@ async function insertJob(client: Client, job: any): Promise<boolean> {
     // slowMo adds delay between all puppeteer actions
     const scraper = new LinkedinScraper({
         headless: true,
-        slowMo: 2500, // 2.5 seconds to avoid LinkedIn rate limiting (increase if still getting 429)
+        slowMo: 1500, // 2.5 seconds to avoid LinkedIn rate limiting (increase if still getting 429)
         args: [
             "--lang=en-US",
         ],
