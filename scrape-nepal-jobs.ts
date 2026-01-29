@@ -241,12 +241,12 @@ async function insertJob(client: Client, job: any): Promise<boolean> {
 
     console.log("Starting to scrape LinkedIn jobs from Nepal (within last 7 days)...\n");
     
-    if (env.LI_AT_COOKIE) {
-        console.log("✓ Using authenticated session\n");
-    } else {
-        console.log("⚠ Using anonymous session (may not work reliably)");
-        console.log("Set LI_AT_COOKIE environment variable for better results\n");
-    }
+    // if (env.LI_AT_COOKIE) {
+    //     console.log("✓ Using authenticated session\n");
+    // } else {
+    //     console.log("⚠ Using anonymous session (may not work reliably)");
+    //     console.log("Set LI_AT_COOKIE environment variable for better results\n");
+    // }
     
     // Scrape ALL jobs - set very high limit (LinkedIn typically shows max 1000 results per search)
     // The scraper will stop automatically when no more jobs are available

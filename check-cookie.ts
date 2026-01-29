@@ -5,16 +5,16 @@ dotenv.config();
 import { LinkedinScraper, events } from "./src/index";
 
 (async () => {
-    if (!process.env.LI_AT_COOKIE) {
-        console.error("❌ LI_AT_COOKIE environment variable is not set!");
-        console.log("\nTo set it in PowerShell:");
-        console.log('$env:LI_AT_COOKIE="your_cookie_value_here"');
-        process.exit(1);
-    }
+    // if (!process.env.LI_AT_COOKIE) {
+    //     console.error("❌ LI_AT_COOKIE environment variable is not set!");
+    //     console.log("\nTo set it in PowerShell:");
+    //     console.log('$env:LI_AT_COOKIE="your_cookie_value_here"');
+    //     process.exit(1);
+    // }
 
     console.log("Testing LinkedIn cookie...\n");
-    console.log(`Cookie length: ${process.env.LI_AT_COOKIE.length} characters`);
-    console.log(`Cookie preview: ${process.env.LI_AT_COOKIE.substring(0, 20)}...\n`);
+    // console.log(`Cookie length: ${process.env.LI_AT_COOKIE.length} characters`);
+    // console.log(`Cookie preview: ${process.env.LI_AT_COOKIE.substring(0, 20)}...\n`);
 
     const scraper = new LinkedinScraper({
         headless: true,
