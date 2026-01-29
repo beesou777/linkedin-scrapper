@@ -169,9 +169,21 @@ export class AuthenticatedStrategy extends RunStrategy {
         logger.info(tag, 'Opening', url.toString());
 
         // Navigate new url
-        await page.goto(url.toString(), {
-            waitUntil: 'load',
-        });
+        try {
+            await page.goto(url.toString(), {
+                waitUntil: 'domcontentloaded',
+                timeout: 30000,
+            });
+        } catch (err: any) {
+            if (err.message && err.message.includes('ERR_TOO_MANY_REDIRECTS')) {
+                logger.error(tag, "Too many redirects during pagination. The cookie may be invalid or expired.");
+                return {
+                    success: false,
+                    error: `Too many redirects during pagination`
+                };
+            }
+            throw err;
+        }
 
         const pollingTime = 100;
         let elapsed = 0;
@@ -366,9 +378,19 @@ export class AuthenticatedStrategy extends RunStrategy {
         // Navigate to home page
         logger.debug(tag, "Opening", urls.home);
 
-        await page.goto(urls.home, {
-            waitUntil: 'load',
-        });
+        try {
+            await page.goto(urls.home, {
+                waitUntil: 'domcontentloaded',
+                timeout: 30000,
+            });
+        } catch (err: any) {
+            if (err.message && err.message.includes('ERR_TOO_MANY_REDIRECTS')) {
+                logger.error(tag, "Too many redirects detected. The cookie may be invalid or expired.");
+                this.scraper.emit(events.scraper.invalidSession);
+                return { exit: true };
+            }
+            throw err;
+        }
 
         // Set cookie from configuration / environment
         if (!config.LI_AT_COOKIE) {
@@ -381,8 +403,30 @@ export class AuthenticatedStrategy extends RunStrategy {
         await page.setCookie({
             name: "li_at",
             value: config.LI_AT_COOKIE,
-            domain: ".linkedin.com"
+            domain: ".linkedin.com",
+            path: "/",
+            secure: true,
+            sameSite: "None",
         });
+
+        // Wait a bit for cookie to be properly set
+        await sleep(1000);
+
+        // Navigate to home again to ensure cookie is recognized
+        try {
+            await page.goto(urls.home, {
+                waitUntil: 'domcontentloaded',
+                timeout: 30000,
+            });
+            await sleep(500);
+        } catch (err: any) {
+            if (err.message && err.message.includes('ERR_TOO_MANY_REDIRECTS')) {
+                logger.error(tag, "Too many redirects after setting cookie. The cookie may be invalid or expired.");
+                this.scraper.emit(events.scraper.invalidSession);
+                return { exit: true };
+            }
+            throw err;
+        }
 
         // Override start by the page offset
         const _url = new URL(url);
@@ -392,9 +436,38 @@ export class AuthenticatedStrategy extends RunStrategy {
         // Open search url
         logger.info(tag, "Opening", url);
 
-        await page.goto(url, {
-            waitUntil: 'load',
-        });
+        try {
+            await page.goto(url, {
+                waitUntil: 'networkidle0',
+                timeout: 60000,
+            });
+        } catch (err: any) {
+            // If networkidle0 times out, try with domcontentloaded as fallback
+            if (err.message && err.message.includes('timeout')) {
+                logger.warn(tag, "Network idle timeout, trying with domcontentloaded...");
+                try {
+                    await page.goto(url, {
+                        waitUntil: 'domcontentloaded',
+                        timeout: 30000,
+                    });
+                    // Wait a bit more for content to load
+                    await sleep(3000);
+                } catch (err2: any) {
+                    if (err2.message && err2.message.includes('ERR_TOO_MANY_REDIRECTS')) {
+                        logger.error(tag, "Too many redirects when navigating to search URL. The cookie may be invalid or expired.");
+                        this.scraper.emit(events.scraper.invalidSession);
+                        return { exit: true };
+                    }
+                    throw err2;
+                }
+            } else if (err.message && err.message.includes('ERR_TOO_MANY_REDIRECTS')) {
+                logger.error(tag, "Too many redirects when navigating to search URL. The cookie may be invalid or expired.");
+                this.scraper.emit(events.scraper.invalidSession);
+                return { exit: true };
+            } else {
+                throw err;
+            }
+        }
 
         // Verify session
         if (!(await AuthenticatedStrategy._isAuthenticatedSession(page))) {
@@ -403,13 +476,95 @@ export class AuthenticatedStrategy extends RunStrategy {
             return { exit: true };
         }
 
-        try {
-            await page.waitForSelector(selectors.container, { timeout: 5000 });
+        // Wait for page to fully load and handle any modals/cookies
+        await AuthenticatedStrategy._hideChatPanel(page, tag);
+        await AuthenticatedStrategy._acceptCookies(page, tag);
+        await AuthenticatedStrategy._acceptPrivacy(page, tag);
+
+        // Wait a bit for the page to settle
+        await sleep(2000);
+
+        // Try to wait for jobs container or job cards with multiple fallbacks
+        let jobsFound = false;
+        const selectorsToTry = [
+            selectors.container,
+            selectors.jobs,
+            'ul.scaffold-layout__list-container',
+            '.jobs-search-results-list',
+            '.jobs-search__results-list',
+        ];
+
+        for (const selector of selectorsToTry) {
+            try {
+                await page.waitForSelector(selector, { timeout: 10000 });
+                logger.debug(tag, `Found container with selector: ${selector}`);
+                
+                // Check if there are actual job cards
+                const jobCount = await page.evaluate((jobSelector) => {
+                    return document.querySelectorAll(jobSelector).length;
+                }, selectors.jobs);
+
+                if (jobCount > 0) {
+                    logger.info(tag, `Found ${jobCount} job cards on the page`);
+                    jobsFound = true;
+                    break;
+                } else {
+                    // Try scrolling to trigger lazy loading
+                    await page.evaluate(() => {
+                        window.scrollTo(0, document.body.scrollHeight / 2);
+                    });
+                    await sleep(1000);
+                    
+                    const jobCountAfterScroll = await page.evaluate((jobSelector) => {
+                        return document.querySelectorAll(jobSelector).length;
+                    }, selectors.jobs);
+
+                    if (jobCountAfterScroll > 0) {
+                        logger.info(tag, `Found ${jobCountAfterScroll} job cards after scrolling`);
+                        jobsFound = true;
+                        break;
+                    }
+                }
+            } catch (err) {
+                // Try next selector
+                continue;
+            }
         }
-        catch(err: any) {
-            logger.info(tag, `No jobs found, skip`);
-            return { exit: false };
+
+        if (!jobsFound) {
+            // Last attempt: check for any job-related elements
+            const anyJobs = await page.evaluate(() => {
+                const jobSelectors = [
+                    'div.job-card-container',
+                    'li.jobs-search-results__list-item',
+                    'div[data-job-id]',
+                    'a.job-card-container__link',
+                ];
+                
+                for (const selector of jobSelectors) {
+                    const elements = document.querySelectorAll(selector);
+                    if (elements.length > 0) {
+                        return elements.length;
+                    }
+                }
+                return 0;
+            });
+
+            if (anyJobs === 0) {
+                logger.warn(tag, `No jobs found after checking multiple selectors. Page URL: ${page.url()}`);
+                logger.debug(tag, `Page title: ${await page.title()}`);
+                return { exit: false };
+            } else {
+                logger.info(tag, `Found ${anyJobs} jobs using fallback detection`);
+                jobsFound = true;
+            }
         }
+
+        // Scroll to top to ensure we start from the beginning
+        await page.evaluate(() => {
+            window.scrollTo(0, 0);
+        });
+        await sleep(500);
 
         // Pagination loop
         while (metrics.processed < query.options!.limit!) {
@@ -428,11 +583,34 @@ export class AuthenticatedStrategy extends RunStrategy {
 
             let jobIndex = 0;
 
-            // Get number of all job links in the page
-            let jobsTot = await page.evaluate(
-                (selector) => document.querySelectorAll(selector).length,
-                selectors.jobs
-            );
+            // Get number of all job links in the page - try multiple selectors
+            let jobsTot = await page.evaluate((jobSelector) => {
+                return document.querySelectorAll(jobSelector).length;
+            }, selectors.jobs);
+
+            // If no jobs found with primary selector, try fallback selectors
+            if (jobsTot === 0) {
+                logger.debug(tag, `No jobs found with primary selector, trying fallbacks...`);
+                jobsTot = await page.evaluate(() => {
+                    const selectors = [
+                        'div.job-card-container',
+                        'li.jobs-search-results__list-item',
+                        'div[data-job-id]',
+                        'a.job-card-container__link',
+                        '.job-card-list__entity-lockup',
+                    ];
+                    
+                    for (const selector of selectors) {
+                        const elements = document.querySelectorAll(selector);
+                        if (elements.length > 0) {
+                            return elements.length;
+                        }
+                    }
+                    return 0;
+                });
+            }
+
+            logger.info(tag, `Found ${jobsTot} jobs to process`);
 
             if (jobsTot === 0) {
                 logger.info(tag, `No jobs found, skip`);
@@ -462,14 +640,10 @@ export class AuthenticatedStrategy extends RunStrategy {
 
                 try {
                     // Extract job main fields
-                    logger.debug(tag, 'Evaluating selectors', [
-                        selectors.jobs,
-                        selectors.link,
-                        selectors.title,
-                        selectors.company,
-                        selectors.place,
-                        selectors.date,
-                    ]);
+                    logger.debug(tag, `Processing job ${jobIndex + 1} of ${jobsTot}`);
+
+                    // Wait a bit before extracting to ensure page is stable
+                    await sleep(200);
 
                     const jobFieldsResult = await page.evaluate(
                         (
@@ -481,12 +655,24 @@ export class AuthenticatedStrategy extends RunStrategy {
                             dateSelector: string,
                             jobIndex: number
                         ) => {
-                            const job = document.querySelectorAll(jobsSelector)[jobIndex];
-                            const link = job.querySelector(linkSelector) as HTMLElement;
+                            const jobs = document.querySelectorAll(jobsSelector);
+                            
+                            if (jobIndex >= jobs.length) {
+                                throw new Error(`Job index ${jobIndex} out of range. Found ${jobs.length} jobs.`);
+                            }
 
-                            // Click job link and scroll
-                            link.scrollIntoView();
-                            link.click();
+                            const job = jobs[jobIndex];
+                            if (!job) {
+                                throw new Error(`Job at index ${jobIndex} is null`);
+                            }
+
+                            const link = job.querySelector(linkSelector) as HTMLElement;
+                            if (!link) {
+                                throw new Error(`Link not found for job at index ${jobIndex}`);
+                            }
+
+                            // Scroll into view (click will happen outside evaluate)
+                            link.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
                             // Extract job link (relative)
                             const protocol = window.location.protocol + "//";
@@ -548,6 +734,26 @@ export class AuthenticatedStrategy extends RunStrategy {
                     jobPlace = jobFieldsResult.place;
                     jobDate = jobFieldsResult.date;
                     jobIsPromoted = jobFieldsResult.isPromoted;
+
+                    // Click the job link to load details (if not already clicked in evaluate)
+                    try {
+                        await page.evaluate((jobsSelector, linkSelector, jobIndex) => {
+                            const jobs = document.querySelectorAll(jobsSelector);
+                            if (jobIndex < jobs.length) {
+                                const job = jobs[jobIndex];
+                                const link = job.querySelector(linkSelector) as HTMLElement;
+                                if (link) {
+                                    link.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                    link.click();
+                                }
+                            }
+                        }, selectors.jobs, selectors.link, jobIndex);
+                        
+                        // Wait for job details panel to load
+                        await sleep(1000);
+                    } catch (clickErr: any) {
+                        logger.warn(tag, `Failed to click job link: ${clickErr.message}`);
+                    }
 
                     // Promoted job
                     if (query.options?.skipPromotedJobs && jobIsPromoted) {
@@ -682,9 +888,25 @@ export class AuthenticatedStrategy extends RunStrategy {
                 }
                 catch(err: any) {
                     const errorMessage = `${tag}\t${err.message}`;
+                    logger.error(tag, `Error extracting job ${jobIndex + 1}:`, err.message);
+                    logger.debug(tag, `Error stack:`, err.stack);
                     this.scraper.emit(events.scraper.error, errorMessage);
                     jobIndex++;
                     metrics.failed++;
+                    
+                    // If we're failing on multiple jobs, try to refresh the job count
+                    if (metrics.failed > 3 && metrics.failed % 3 === 0) {
+                        logger.warn(tag, `Multiple extraction failures, refreshing job count...`);
+                        const newJobsTot = await page.evaluate((jobSelector) => {
+                            return document.querySelectorAll(jobSelector).length;
+                        }, selectors.jobs);
+                        
+                        if (newJobsTot !== jobsTot) {
+                            logger.info(tag, `Job count changed from ${jobsTot} to ${newJobsTot}`);
+                            jobsTot = newJobsTot;
+                        }
+                    }
+                    
                     continue;
                 }
 
