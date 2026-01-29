@@ -1,7 +1,12 @@
 const config = {
-    // Read the LinkedIn session cookie from environment variables
-    // Make sure you have LI_AT_COOKIE set in your .env file
-    LI_AT_COOKIE: "AQEDAWM_xr8EV6M-AAABm7aAkoIAAAGb2o0WglYAGOa1jBDRR6KxrRXvzvW9-NcWzBdZFU5VCKZ753e3FQ3C2TraRzYVn9bzJroiDrncE-HnDZziY1HWkFq6pnL833TzjI4eyka87BuNgVxPMVUmh7If",
+    // LinkedIn session cookie (li_at) - Replace with your fresh cookie value
+    // To get your cookie:
+    // 1. Log into LinkedIn in your browser
+    // 2. Open Developer Tools (F12)
+    // 3. Go to Application/Storage tab → Cookies → https://www.linkedin.com
+    // 4. Find 'li_at' cookie and copy its value
+    // 5. Paste it below (the cookie expires periodically, so update it when you get errors)
+    LI_AT_COOKIE: "AQEDAWM_xr8FLJUFAAABm7duZb4AAAGcGMv2100AvzeXCpL0wnONLkFivtSz6pbLGRenA-faapcnh9QKVjMsPFPeYbWH0DhFkpFPJzWVjCPuqB6xyOhaChLcxsP55p33jkmURRXaefqK8HqSD8cgbAyf",
 };
 
 export {

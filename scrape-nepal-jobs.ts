@@ -127,10 +127,10 @@ async function insertJob(client: Client, job: any): Promise<boolean> {
     console.log(`📊 Tracking ${existingIds.size} unique job identifiers (file + database)\n`);
 
     // Initialize the scraper with slower speed to avoid rate limiting
-    // slowMo: 500ms = 2 requests per second max
+    // slowMo adds delay between all puppeteer actions
     const scraper = new LinkedinScraper({
         headless: true,
-        slowMo: 1000, // Increased to 500ms to avoid rate limiting (was 250ms)
+        slowMo: 2500, // 2.5 seconds to avoid LinkedIn rate limiting (increase if still getting 429)
         args: [
             "--lang=en-US",
         ],
@@ -196,10 +196,10 @@ async function insertJob(client: Client, job: any): Promise<boolean> {
         console.error("Error occurred:", err);
     });
 
-    // Listen for invalid session
-    scraper.on(events.scraper.invalidSession, () => {
-        console.error("Invalid session! Please check your LI_AT_COOKIE",env.LI_AT_COOKIE);
-    });
+    // // Listen for invalid session
+    // scraper.on(events.scraper.invalidSession, () => {
+    //     console.error("Invalid session! Please check your LI_AT_COOKIE",env.LI_AT_COOKIE);
+    // });
 
     // Listen for end event
     scraper.on(events.scraper.end, async () => {
@@ -254,11 +254,11 @@ async function insertJob(client: Client, job: any): Promise<boolean> {
     const MAX_JOBS_TO_SCRAPE = 500;
     
     console.log(`🎯 Target: Scrape up to ${MAX_JOBS_TO_SCRAPE} jobs (will stop when no more available)\n`);
-    console.log("⏱️  Speed: 500ms delay between actions (~2 requests/sec) to avoid rate limiting\n");
+    console.log("⏱️  Speed: 2.5s delay between actions to avoid LinkedIn rate limiting\n");
     console.log("📊 Estimated time:");
-    console.log(`   - 100 jobs: ~5-8 minutes`);
-    console.log(`   - 500 jobs: ~25-40 minutes`);
-    console.log(`   - 1000 jobs: ~50-80 minutes\n`);
+    console.log(`   - 100 jobs: ~10-15 minutes`);
+    console.log(`   - 500 jobs: ~50-75 minutes`);
+    console.log(`   - 1000 jobs: ~100-150 minutes\n`);
     console.log("💡 Tip: The scraper automatically stops when no more jobs are found\n");
     
     // Run the scraper with Nepal as location and filter for jobs posted within last 7 days

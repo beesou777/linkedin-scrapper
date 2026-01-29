@@ -12,7 +12,8 @@ import debug from "debug";
 export const selectors = {
     container: '.scaffold-layout__list',
     chatPanel: '.msg-overlay-list-bubble',
-    jobs: 'div.job-card-container',
+    jobs: 'div.job-card-container[data-job-id]', // More specific - must have data-job-id
+    jobsList: '.scaffold-layout__list ul', // UL container (class is hashed, so use descendant selector)
     link: 'a.job-card-container__link',
     applyBtn: 'button.jobs-apply-button[role="link"]',
     title: '.artdeco-entity-lockup__title',
