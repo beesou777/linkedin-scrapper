@@ -130,7 +130,7 @@ async function insertJob(client: Client, job: any): Promise<boolean> {
     // slowMo adds delay between all puppeteer actions
     const scraper = new LinkedinScraper({
         headless: true,
-        slowMo: 1500, // 2.5 seconds to avoid LinkedIn rate limiting (increase if still getting 429)
+        slowMo: 1200, // 2.5 seconds to avoid LinkedIn rate limiting (increase if still getting 429)
         args: [
             "--lang=en-US",
         ],
@@ -251,7 +251,7 @@ async function insertJob(client: Client, job: any): Promise<boolean> {
     // Scrape ALL jobs - set very high limit (LinkedIn typically shows max 1000 results per search)
     // The scraper will stop automatically when no more jobs are available
     // Can be overridden with MAX_JOBS environment variable
-    const MAX_JOBS_TO_SCRAPE = 500;
+    const MAX_JOBS_TO_SCRAPE = 250;
     
     console.log(`🎯 Target: Scrape up to ${MAX_JOBS_TO_SCRAPE} jobs (will stop when no more available)\n`);
     console.log("⏱️  Speed: 2.5s delay between actions to avoid LinkedIn rate limiting\n");
