@@ -6,7 +6,7 @@ const config = {
     // 3. Go to Application/Storage tab → Cookies → https://www.linkedin.com
     // 4. Find 'li_at' cookie and copy its value
     // 5. Paste it below (the cookie expires periodically, so update it when you get errors)
-    LI_AT_COOKIE: "AQEDAWM_xr8COB_UAAABoJmuT2AAAAGgvbrTYFYAnkCvO3C8XwNKQGpylzKiFZtbZQG9soBSeeFmCRyRbLrMetFrQwfjGRnEdnLerSz9Xx9nRVQr1OW2ty38efudEp9A0Nql4fIHhpZ7y5iA60xxDnKU",
+    LI_AT_COOKIE: "AQEDAW4gtHwACpG6AAABoJm55VcAAAGgvcZpV1YAUEG30w2kGmbOR3ayNRtLzfdGc4Gwgc7tljIt2Jof4IXGLF4g5nEnFDkMcJ94X1M7vACo3YI1w4dUj_l22YeDMixC9DcO6_fiUcqmnLM-Evj1BOhm",
 };
 
 export {
