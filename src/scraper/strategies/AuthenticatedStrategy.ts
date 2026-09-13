@@ -6,7 +6,6 @@ import { sleep } from "../../utils/utils";
 import { normalizeString } from "../../utils/string";
 import { IQuery } from "../query";
 import { logger } from "../../logger/logger";
-import { urls } from "../constants";
 import debug from "debug";
 
 export const selectors = {
@@ -48,6 +47,12 @@ export class AuthenticatedStrategy extends RunStrategy {
      * @private
      */
     private static _isAuthenticatedSession = async (page: Page): Promise<boolean> => {
+        if (/\/(login|checkpoint|uas|authwall)(\/|\?|$)/i.test(new URL(page.url()).pathname)) {
+            return false;
+        }
+        if (await page.$('input[name="session_key"], input[name="session_password"], #captcha-internal')) {
+            return false;
+        }
         const cookies = await page.cookies();
         return cookies.some(e => e.name === "li_at");
     };
@@ -376,23 +381,6 @@ export class AuthenticatedStrategy extends RunStrategy {
         let paginationIndex = query.options?.pageOffset || 0;
         let paginationSize = 25;
 
-        // Navigate to home page
-        logger.debug(tag, "Opening", urls.home);
-
-        try {
-            await page.goto(urls.home, {
-                waitUntil: 'domcontentloaded',
-                timeout: 30000,
-            });
-        } catch (err: any) {
-            if (err.message && err.message.includes('ERR_TOO_MANY_REDIRECTS')) {
-                logger.error(tag, "Too many redirects detected. The cookie may be invalid or expired.");
-                this.scraper.emit(events.scraper.invalidSession);
-                return { exit: true };
-            }
-            throw err;
-        }
-
         // Set cookie from configuration / environment
         if (!config.LI_AT_COOKIE) {
             logger.error("LI_AT_COOKIE is not set. Please define it in your environment or .env file.");
@@ -403,31 +391,12 @@ export class AuthenticatedStrategy extends RunStrategy {
         logger.info("Setting authentication cookie from LI_AT_COOKIE");
         await page.setCookie({
             name: "li_at",
-            value: config.LI_AT_COOKIE,
+            value: config.LI_AT_COOKIE.trim(),
             domain: ".linkedin.com",
             path: "/",
             secure: true,
             sameSite: "None",
         });
-
-        // Wait a bit for cookie to be properly set
-        await sleep(1000);
-
-        // Navigate to home again to ensure cookie is recognized
-        try {
-            await page.goto(urls.home, {
-                waitUntil: 'domcontentloaded',
-                timeout: 30000,
-            });
-            await sleep(500);
-        } catch (err: any) {
-            if (err.message && err.message.includes('ERR_TOO_MANY_REDIRECTS')) {
-                logger.error(tag, "Too many redirects after setting cookie. The cookie may be invalid or expired.");
-                this.scraper.emit(events.scraper.invalidSession);
-                return { exit: true };
-            }
-            throw err;
-        }
 
         // Override start by the page offset
         const _url = new URL(url);
@@ -438,31 +407,18 @@ export class AuthenticatedStrategy extends RunStrategy {
         logger.info(tag, "Opening", url);
 
         try {
-            await page.goto(url, {
-                waitUntil: 'networkidle0',
+            const response = await page.goto(url, {
+                waitUntil: 'domcontentloaded',
                 timeout: 60000,
             });
+            if (response && [401, 403].includes(response.status())) {
+                logger.error(tag, 'LinkedIn rejected the search request. Sign in manually, complete any verification, and update LI_AT_COOKIE.');
+                this.scraper.emit(events.scraper.invalidSession);
+                return { exit: true };
+            }
         } catch (err: any) {
-            // If networkidle0 times out, try with domcontentloaded as fallback
-            if (err.message && err.message.includes('timeout')) {
-                logger.warn(tag, "Network idle timeout, trying with domcontentloaded...");
-                try {
-                    await page.goto(url, {
-                        waitUntil: 'domcontentloaded',
-                        timeout: 30000,
-                    });
-                    // Wait a bit more for content to load
-                    await sleep(3000);
-                } catch (err2: any) {
-                    if (err2.message && err2.message.includes('ERR_TOO_MANY_REDIRECTS')) {
-                        logger.error(tag, "Too many redirects when navigating to search URL. The cookie may be invalid or expired.");
-                        this.scraper.emit(events.scraper.invalidSession);
-                        return { exit: true };
-                    }
-                    throw err2;
-                }
-            } else if (err.message && err.message.includes('ERR_TOO_MANY_REDIRECTS')) {
-                logger.error(tag, "Too many redirects when navigating to search URL. The cookie may be invalid or expired.");
+            if (err.message && err.message.includes('ERR_TOO_MANY_REDIRECTS')) {
+                logger.error(tag, 'LinkedIn entered a redirect loop. Sign in manually, complete any verification, and update LI_AT_COOKIE before rerunning.');
                 this.scraper.emit(events.scraper.invalidSession);
                 return { exit: true };
             } else {
