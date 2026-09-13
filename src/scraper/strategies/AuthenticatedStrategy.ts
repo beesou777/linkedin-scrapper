@@ -183,10 +183,7 @@ export class AuthenticatedStrategy extends RunStrategy {
         } catch (err: any) {
             if (err.message && err.message.includes('ERR_TOO_MANY_REDIRECTS')) {
                 logger.error(tag, "Too many redirects during pagination. The cookie may be invalid or expired.");
-                return {
-                    success: false,
-                    error: `Too many redirects during pagination`
-                };
+                throw err;
             }
             throw err;
         }
@@ -419,8 +416,7 @@ export class AuthenticatedStrategy extends RunStrategy {
         } catch (err: any) {
             if (err.message && err.message.includes('ERR_TOO_MANY_REDIRECTS')) {
                 logger.error(tag, 'LinkedIn entered a redirect loop. Sign in manually, complete any verification, and update LI_AT_COOKIE before rerunning.');
-                this.scraper.emit(events.scraper.invalidSession);
-                return { exit: true };
+                throw err;
             } else {
                 throw err;
             }

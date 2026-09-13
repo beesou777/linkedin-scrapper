@@ -2,9 +2,13 @@ name: Scrape LinkedIn Jobs
 
 on:
   schedule:
-    # Run daily at 6 AM UTC (11:45 AM Nepal time)
-    - cron: '5 3 * * *'
+    # Revisit the rolling 24-hour window every four hours to fill gaps.
+    - cron: '5 */4 * * *'
   workflow_dispatch: # Allow manual triggering
+
+concurrency:
+  group: linkedin-job-scraper
+  cancel-in-progress: false
 
 jobs:
   scrape:

@@ -130,7 +130,7 @@ async function insertJob(client: Client, job: any): Promise<boolean> {
     // slowMo adds delay between all puppeteer actions
     const scraper = new LinkedinScraper({
         headless: true,
-        slowMo: 1200, // 2.5 seconds to avoid LinkedIn rate limiting (increase if still getting 429)
+        slowMo: 3000, // Three seconds between Puppeteer actions.
         args: [
             "--lang=en-US",
         ],
@@ -138,6 +138,7 @@ async function insertJob(client: Client, job: any): Promise<boolean> {
 
     // Array to store new jobs from this run
     const newJobs: any[] = [];
+    let pendingWrites = Promise.resolve();
     let duplicateCount = 0;
 
     // Listen for job data
@@ -157,10 +158,9 @@ async function insertJob(client: Client, job: any): Promise<boolean> {
         };
         
         // Check for duplicates
-        const isDuplicate = 
-            (job.jobId && existingIds.has(`id:${job.jobId}`)) ||
-            (job.link && existingIds.has(`link:${job.link}`)) ||
-            (job.applyLink && job.applyLink !== "N/A" && existingIds.has(`apply:${job.applyLink}`));
+        const isDuplicate = job.jobId
+            ? existingIds.has(`id:${job.jobId}`)
+            : Boolean(job.link && existingIds.has(`link:${job.link}`));
         
         if (isDuplicate) {
             duplicateCount++;
@@ -176,6 +176,12 @@ async function insertJob(client: Client, job: any): Promise<boolean> {
         }
         
         newJobs.push(job);
+        // Persist before the next browser action, including on interrupted runs.
+        fs.writeFileSync(JSON_FILE, JSON.stringify([...existingJobs, ...newJobs], null, 2));
+        if (dbClient) {
+            const client = dbClient;
+            pendingWrites = pendingWrites.then(async () => { await insertJob(client, job); });
+        }
         
         console.log("\n=== New Job Added ===");
         console.log(`Title: ${job.title}`);
@@ -202,7 +208,8 @@ async function insertJob(client: Client, job: any): Promise<boolean> {
     // });
 
     // Listen for end event
-    scraper.on(events.scraper.end, async () => {
+    const saveResults = async () => {
+        await pendingWrites;
         console.log(`\n📊 Scraping Summary:`);
         console.log(`   New jobs found: ${newJobs.length}`);
         console.log(`   Duplicates skipped: ${duplicateCount}`);
@@ -237,7 +244,7 @@ async function insertJob(client: Client, job: any): Promise<boolean> {
             await dbClient.end();
             console.log("✓ Database connection closed");
         }
-    });
+    };
 
     console.log("Starting to scrape LinkedIn jobs from Nepal (within last 7 days)...\n");
     
@@ -251,7 +258,7 @@ async function insertJob(client: Client, job: any): Promise<boolean> {
     // Scrape ALL jobs - set very high limit (LinkedIn typically shows max 1000 results per search)
     // The scraper will stop automatically when no more jobs are available
     // Can be overridden with MAX_JOBS environment variable
-    const MAX_JOBS_TO_SCRAPE = 250;
+    const MAX_JOBS_TO_SCRAPE = Number.MAX_SAFE_INTEGER;
     
     console.log(`🎯 Target: Scrape up to ${MAX_JOBS_TO_SCRAPE} jobs (will stop when no more available)\n`);
     console.log("⏱️  Speed: 2.5s delay between actions to avoid LinkedIn rate limiting\n");
@@ -262,6 +269,12 @@ async function insertJob(client: Client, job: any): Promise<boolean> {
     console.log("💡 Tip: The scraper automatically stops when no more jobs are found\n");
     
     // Run the scraper with Nepal as location and filter for jobs posted within last 7 days
+    // Leave five minutes for database writes and artifact upload before the step timeout.
+    const deadline = setTimeout(() => {
+        console.warn('Run time budget reached. Closing browser and saving partial results.');
+        void scraper.close();
+    }, 50 * 60 * 1000);
+    try {
     await scraper.run({
         query: "",
         options: {
@@ -276,7 +289,10 @@ async function insertJob(client: Client, job: any): Promise<boolean> {
         limit: MAX_JOBS_TO_SCRAPE,
     });
 
-    // Close browser
-    await scraper.close();
+    } finally {
+        clearTimeout(deadline);
+        await scraper.close();
+        await saveResults();
+    }
 })();
 
