@@ -1,5 +1,4 @@
 import deepmerge from 'deepmerge';
-import { config } from '../config';
 import puppeteer from 'puppeteer';
 import { Browser, BrowserContext, HTTPRequest } from 'puppeteer';
 import { events, IEventListeners } from './events';
@@ -11,7 +10,7 @@ import { urls, } from './constants';
 import { IQuery, IQueryOptions, validateQuery } from './query';
 import { getRandomUserAgent } from '../utils/browser';
 import { Scraper, ScraperOptions } from './Scraper';
-import { RunStrategy, AuthenticatedStrategy, AnonymousStrategy } from './strategies';
+import { RunStrategy, AnonymousStrategy } from './strategies';
 import { logger } from '../logger/logger';
 
 // puppeteer.use(require('puppeteer-extra-plugin-stealth')()); // TODO: breaks with new target tabs: to investigate
@@ -35,14 +34,8 @@ class LinkedinScraper extends Scraper {
     constructor(options: ScraperOptions) {
         super(options);
 
-        if (config.LI_AT_COOKIE) {
-            this._runStrategy = new AuthenticatedStrategy(this);
-            logger.info(`Env variable LI_AT_COOKIE detected. Using ${AuthenticatedStrategy.name}`)
-        }
-        else {
-            this._runStrategy = new AnonymousStrategy(this);
-            logger.info(`Using ${AnonymousStrategy.name}`)
-        }
+        this._runStrategy = new AnonymousStrategy(this);
+        logger.info(`Using ${AnonymousStrategy.name}`);
     }
 
     /**
@@ -235,8 +228,13 @@ class LinkedinScraper extends Scraper {
                 // // Set a random user agent
                 // await page.setUserAgent(getRandomUserAgent());
 
-                // Enable request interception
-                await page.setRequestInterception(true);
+                const useRequestInterception = false;
+
+                // Authenticated mode blocks tracking and third-party resources.
+                // Public mode leaves the page's normal resource loading intact.
+                if (useRequestInterception) {
+                    await page.setRequestInterception(true);
+                }
 
                 const onRequest = async (request: HTTPRequest) => {
                     const url = new URL(request.url());
@@ -285,11 +283,19 @@ class LinkedinScraper extends Scraper {
                     await request.continue();
                 }
 
-                // Add listener
-                page.on("request", onRequest);
+                if (useRequestInterception) {
+                    page.on("request", onRequest);
+                }
 
                 // Error response and rate limiting check
                 page.on("response",  response => {
+                    const responseUrl = new URL(response.url());
+                    // Google's optional sign-in status does not affect job extraction.
+                    if (response.status() === 400 &&
+                        responseUrl.hostname === 'accounts.google.com' &&
+                        responseUrl.pathname === '/gsi/status') {
+                        return;
+                    }
                     if (response.status() === 429) {
                         logger.warn(tag, "Error 429 too many requests. You would probably need to use a higher 'slowMo' value and/or reduce the number of concurrent queries.");
                     }

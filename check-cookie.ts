@@ -5,16 +5,8 @@ dotenv.config();
 import { LinkedinScraper, events } from "./src/index";
 
 (async () => {
-    // if (!process.env.LI_AT_COOKIE) {
-    //     console.error("❌ LI_AT_COOKIE environment variable is not set!");
-    //     console.log("\nTo set it in PowerShell:");
-    //     console.log('$env:LI_AT_COOKIE="your_cookie_value_here"');
-    //     process.exit(1);
-    // }
 
     console.log("Testing LinkedIn cookie...\n");
-    // console.log(`Cookie length: ${process.env.LI_AT_COOKIE.length} characters`);
-    // console.log(`Cookie preview: ${process.env.LI_AT_COOKIE.substring(0, 20)}...\n`);
 
     const scraper = new LinkedinScraper({
         headless: true,
@@ -29,7 +21,6 @@ import { LinkedinScraper, events } from "./src/index";
         console.log("1. Login to LinkedIn in your browser");
         console.log("2. Open DevTools (F12) → Application → Cookies → linkedin.com");
         console.log("3. Find 'li_at' cookie and copy its value");
-        console.log("4. Set it as: $env:LI_AT_COOKIE='your_new_cookie'");
         cookieValid = false;
     });
 

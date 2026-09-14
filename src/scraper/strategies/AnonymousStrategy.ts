@@ -9,18 +9,16 @@ export class Selectors {
     static switchSelectors = false;
 
     static get container() {
-        return !this.switchSelectors ? '.results__container.results__container--two-pane' :
+        return !this.switchSelectors ? '.jobs-search__results-list' :
             '.two-pane-serp-page__results-list';
     }
 
     static get jobs() {
-        return !this.switchSelectors ? '.jobs-search__results-list li' :
-            '.jobs-search__results-list li';
+        return '.jobs-search__results-list > li:has(.base-card__full-link)';
     }
 
     static get links() {
-        return !this.switchSelectors ? '.jobs-search__results-list li a.result-card__full-card-link' :
-            'a.base-card__full-link';
+        return 'a.base-card__full-link';
     }
 
     static get applyLink() {
@@ -32,21 +30,21 @@ export class Selectors {
     }
 
     static get companies() {
-        return !this.switchSelectors ? '.result-card__subtitle.job-result-card__subtitle' :
+        return !this.switchSelectors ? '.base-search-card__subtitle' :
             '.base-search-card__subtitle';
     }
 
     static get places() {
-        return !this.switchSelectors ? '.job-result-card__location' :
+        return !this.switchSelectors ? '.job-search-card__location' :
             '.job-search-card__location';
     }
 
     static get detailsPanel() {
-        return '.details-pane__content';
+        return '.details, .details-pane__content';
     }
 
     static get description() {
-        return '.description__text';
+        return '.description__text .show-more-less-html__markup';
     }
 
     static get seeMoreJobs() {
@@ -71,7 +69,7 @@ export class AnonymousStrategy extends RunStrategy {
         page: Page
     ): Promise<boolean> => {
         const parsed = new URL(await page.url());
-        return parsed.pathname.toLowerCase().includes("authwall");
+        return /authwall|checkpoint|challenge|\/login|\/signup/i.test(parsed.pathname);
     };
 
     /**
@@ -136,54 +134,43 @@ export class AnonymousStrategy extends RunStrategy {
     private static _loadMoreJobs = async (
         page: Page,
         jobLinksTot: number,
-        timeout: number = 2000
+        timeout: number = 30000
     ): Promise<ILoadResult> => {
-        const pollingTime = 100;
-        let elapsed = 0;
-        let loaded = false;
+        const deadline = Date.now() + timeout;
         let clicked = false;
 
-        while(!loaded) {
-            if (!clicked) {
-                clicked = await page.evaluate(
-                    (selector: string) => {
-                        const button = <HTMLElement>document.querySelector(selector);
-
-                        if (button) {
-                            button.click();
-                            return true;
-                        }
-                        else {
-                            return false;
-                        }
-                    },
-                    Selectors.seeMoreJobs
-                );
+        while (Date.now() < deadline) {
+            if (await AnonymousStrategy._needsAuthentication(page)) {
+                throw new Error('Public pagination requires authentication.');
             }
-
-            loaded = await page.evaluate(
-                (selector: string, jobLinksTot: number) => {
+            const state: { count: number; didClick: boolean } = await page.evaluate(
+                (selector: string, buttonSelector: string, alreadyClicked: boolean) => {
+                    const cards = document.querySelectorAll(selector);
+                    // scrollIntoView also scrolls a nested results pane, if present.
+                    cards[cards.length - 1]?.scrollIntoView({ block: 'end' });
                     window.scrollTo(0, document.body.scrollHeight);
-                    return document.querySelectorAll(selector).length > jobLinksTot;
+                    const button = document.querySelector<HTMLButtonElement>(buttonSelector);
+                    let didClick = false;
+                    if (!alreadyClicked && button && !button.disabled &&
+                        button.getClientRects().length > 0 &&
+                        getComputedStyle(button).visibility !== 'hidden') {
+                        button.click();
+                        didClick = true;
+                    }
+                    return { count: cards.length, didClick };
                 },
                 Selectors.jobs,
-                jobLinksTot
+                Selectors.seeMoreJobs,
+                clicked
             );
-
-            if (loaded) return { success: true };
-
-            await sleep(pollingTime);
-            elapsed += pollingTime;
-
-            if (elapsed >= timeout) {
-                return {
-                    success: false,
-                    error: `Timeout on loading more jobs`
-                };
+            clicked = clicked || state.didClick;
+            if (state.count > jobLinksTot) {
+                logger.info(`Public pagination loaded ${state.count - jobLinksTot} additional jobs (${state.count} total).`);
+                return { success: true };
             }
+            await sleep(1000);
         }
-
-        return { success: true };
+        return { success: false, error: `No additional job cards loaded within ${timeout / 1000} seconds.` };
     };
 
     /**
@@ -227,16 +214,20 @@ export class AnonymousStrategy extends RunStrategy {
         query: IQuery,
         location: string,
     ): Promise<IRunStrategyResult> => {
-        console.warn("Anonymous session strategy is no longer maintained and it won't probably work. It is recommended to use an authenticated session, see documentation at https://github.com/spinlud/linkedin-jobs-scraper#anonymous-vs-authenticated-session.");
+        logger.info(`[${query.query}][${location}] Using public unauthenticated LinkedIn pages; no session cookie will be used.`);
 
         let tag = `[${query.query}][${location}]`;
         let processed = 0;
 
         logger.info(tag, "Opening", url);
 
-        await page.goto(url, {
-            waitUntil: 'load',
+        const response = await page.goto(url, {
+            waitUntil: 'domcontentloaded',
+            timeout: 60000,
         });
+        if (!response || response.status() >= 400 || page.url().startsWith('chrome-error:')) {
+            throw new Error(`Public job search failed (HTTP ${response?.status() ?? 'unknown'}).`);
+        }
 
         // Verify if authentication is required
         if ((await AnonymousStrategy._needsAuthentication(page))) {
@@ -250,21 +241,25 @@ export class AnonymousStrategy extends RunStrategy {
         // Try to load first set of selectors
         try {
             Selectors.switchSelectors = false;
-            logger.info(tag, 'Trying to load first selectors set');
-            logger.debug(tag, `Evaluating selectors`, [Selectors.container]);
-            await page.waitForSelector(Selectors.container, { timeout: 3000 });
+            logger.info(tag, 'Waiting for public job list');
+            logger.debug(tag, `Evaluating selectors`, [Selectors]);
+            await page.waitForSelector(Selectors.container, { timeout: 15000 });
         }
         catch(err: any) {
             // Try to load second set of selectors
             try {
                 Selectors.switchSelectors = true;
-                logger.info(tag, 'Trying to load second selectors set');
+                logger.info(tag, 'Checking alternate public job layout');
                 logger.debug(tag, `Evaluating selectors`, [Selectors.container]);
                 await page.waitForSelector(Selectors.container, { timeout: 3000 });
             }
             catch(err: any) {
-                logger.info(tag, 'Failed to load container selector, skip');
-                return { exit: false };
+                const state = await page.evaluate(() => ({
+                    path: window.location.origin + window.location.pathname,
+                    title: document.title,
+                    cards: document.querySelectorAll('.base-search-card').length,
+                }));
+                throw new Error(`Public search container missing: ${JSON.stringify(state)}. This is a page-load or markup failure, not a confirmed empty search.`);
             }
         }
 
@@ -289,6 +284,22 @@ export class AnonymousStrategy extends RunStrategy {
 
             logger.info(tag, "Jobs fetched: " + jobsTot);
 
+            // Collect search batches before opening individual job detail pages.
+            while (jobsTot < query.options!.limit!) {
+                const result = await AnonymousStrategy._loadMoreJobs(page, jobsTot);
+                if (!result.success) {
+                    logger.info(tag, "No more jobs loaded during the wait window.", result.error);
+                    break;
+                }
+                const total = await page.evaluate(
+                    (selector) => document.querySelectorAll(selector).length,
+                    Selectors.jobs
+                );
+                logger.info(tag, `Jobs fetched (load more): ${total - jobsTot} (${total} total)`);
+                jobsTot = total;
+            }
+            logger.info(tag, `Collection complete. Extracting details for up to ${Math.min(jobsTot, query.options!.limit!)} jobs.`);
+
             // Jobs loop
             while (jobIndex < jobsTot && processed < query.options!.limit!) {
                 tag = `[${query.query}][${location}][${processed + 1}]`;
@@ -306,7 +317,7 @@ export class AnonymousStrategy extends RunStrategy {
                 let jobFunction;
                 let jobEmploymentType;
                 let jobIndustries;
-                let loadJobDetailsResult;
+                let detailPage: Page | undefined;
 
                 try {
                     // Extract job main fields
@@ -330,9 +341,7 @@ export class AnonymousStrategy extends RunStrategy {
                             const job = document.querySelectorAll(jobsSelector)[jobIndex];
                             const link = job.querySelector(linksSelector) as HTMLElement;
 
-                            // Click job link and scroll
-                            link.scrollIntoView();
-                            link.click();
+                            // Read the list without navigating away from it.
                             const linkUrl = link.getAttribute("href");
 
                             let jobId: string | null = '';
@@ -350,7 +359,7 @@ export class AnonymousStrategy extends RunStrategy {
                             return [
                                 jobId,
                                 linkUrl,
-                                (<HTMLElement>job.querySelector(linksSelector)).innerText,
+                                (job.querySelector('.base-search-card__title')?.textContent || link.textContent || '').trim(),
                                 (<HTMLElement>job.querySelector(companiesSelector)).innerText,
                                 (<HTMLElement>job.querySelector(placesSelector)).innerText,
                                 (<HTMLElement>job.querySelector(datesSelector)).getAttribute('datetime')
@@ -369,15 +378,12 @@ export class AnonymousStrategy extends RunStrategy {
                         Selectors.links,
                     ]);
 
-                    loadJobDetailsResult = await AnonymousStrategy._loadJobDetails(page, jobId!);
-
-                    // Check if loading job details has failed
-                    if (!loadJobDetailsResult.success) {
-                        logger.error(tag, loadJobDetailsResult.error);
-                        this.scraper.emit(events.scraper.error, `${tag}\t${loadJobDetailsResult.error}`);
-                        jobIndex += 1;
-                        continue;
+                    detailPage = await browser.newPage();
+                    const detailResponse = await detailPage.goto(jobLink!, { waitUntil: 'domcontentloaded', timeout: 60000 });
+                    if (!detailResponse || detailResponse.status() >= 400 || await AnonymousStrategy._needsAuthentication(detailPage)) {
+                        throw new Error(`Public job detail unavailable (HTTP ${detailResponse?.status() ?? 'unknown'}).`);
                     }
+                    await detailPage.waitForSelector(Selectors.description, { timeout: 15000 });
 
                     // Use custom description function if available
                     logger.debug(tag, `Evaluating selectors`, [
@@ -386,14 +392,14 @@ export class AnonymousStrategy extends RunStrategy {
 
                     if (query.options?.descriptionFn) {
                         [jobDescription, jobDescriptionHTML] = await Promise.all([
-                            page.evaluate(`(${query.options.descriptionFn.toString()})();`),
-                            page.evaluate((selector) => {
+                            detailPage.evaluate(`(${query.options.descriptionFn.toString()})();`),
+                            detailPage.evaluate((selector) => {
                                 return (<HTMLElement>document.querySelector(selector)).outerHTML;
                             }, Selectors.description)
                         ]);
                     }
                     else {
-                        [jobDescription, jobDescriptionHTML] = await page.evaluate((selector) => {
+                        [jobDescription, jobDescriptionHTML] = await detailPage.evaluate((selector) => {
                                 const el = (<HTMLElement>document.querySelector(selector));
                                 return [el.innerText, el.outerHTML];
                             },
@@ -406,7 +412,7 @@ export class AnonymousStrategy extends RunStrategy {
                         Selectors.applyLink
                     ]);
 
-                    jobApplyLink = await page.evaluate((selector) => {
+                    jobApplyLink = await detailPage.evaluate((selector) => {
                         const applyBtn = document.querySelector<HTMLElement>(selector);
                         return applyBtn ? applyBtn.getAttribute("href") : null;
                     }, Selectors.applyLink);
@@ -416,6 +422,9 @@ export class AnonymousStrategy extends RunStrategy {
                     this.scraper.emit(events.scraper.error, errorMessage);
                     jobIndex += 1;
                     continue;
+                }
+                finally {
+                    await detailPage?.close();
                 }
 
                 // Emit data
@@ -440,31 +449,9 @@ export class AnonymousStrategy extends RunStrategy {
                 processed += 1;
                 logger.info(tag, `Processed`);
 
-                if (processed < query.options!.limit! && jobIndex === jobsTot) {
-                    logger.info(tag, 'Fecthing new jobs');
-                    jobsTot = await page.evaluate(
-                        (selector) => document.querySelectorAll(selector).length,
-                        Selectors.jobs
-                    );
-                }
             }
 
-            // Check if we reached the limit of jobs to process
-            if (processed === query.options!.limit!) break;
-
-            // Check if there are more jobs to load
-            logger.info(tag, "Checking for new jobs to load...");
-
-            const loadMoreJobsResult = await AnonymousStrategy._loadMoreJobs(
-                page,
-                jobsTot
-            );
-
-            // Check if loading jobs has failed
-            if (!loadMoreJobsResult.success) {
-                logger.info(tag, "There are no more jobs available for the current query");
-                break;
-            }
+            break;
         }
 
         return { exit: false };
