@@ -2,9 +2,13 @@ name: Scrape LinkedIn Jobs
 
 on:
   schedule:
-    # Run daily at 6 AM UTC (11:45 AM Nepal time)
-    - cron: '5 3 * * *'
+    # Revisit the rolling evry 4 hours window every four hours to fill gaps.
+    - cron: '5 */4 * * *'
   workflow_dispatch: # Allow manual triggering
+
+concurrency:
+  group: linkedin-job-scraper
+  cancel-in-progress: false
 
 jobs:
   scrape:
@@ -26,7 +30,6 @@ jobs:
 
       - name: Run scraper
         env:
-          LI_AT_COOKIE: ${{ secrets.LI_AT_COOKIE }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         timeout-minutes: 55 # Slightly less than job timeout
         run: npx ts-node scrape-nepal-jobs.ts

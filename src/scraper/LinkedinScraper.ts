@@ -236,7 +236,17 @@ class LinkedinScraper extends Scraper {
                     await page.setRequestInterception(true);
                 }
 
+                let rateLimited = false;
+                let rejectRateLimit: (error: Error) => void;
+                const rateLimitFailure = new Promise<never>((_, reject) => {
+                    rejectRateLimit = reject;
+                });
+
                 const onRequest = async (request: HTTPRequest) => {
+                    if (rateLimited) {
+                        await request.abort().catch(() => undefined);
+                        return;
+                    }
                     const url = new URL(request.url());
                     const domain = url.hostname.split(".").slice(-2).join(".").toLowerCase();
 
@@ -297,7 +307,21 @@ class LinkedinScraper extends Scraper {
                         return;
                     }
                     if (response.status() === 429) {
-                        logger.warn(tag, "Error 429 too many requests. You would probably need to use a higher 'slowMo' value and/or reduce the number of concurrent queries.");
+                        if (rateLimited) return;
+                        rateLimited = true;
+                        const retryAfter = response.headers()['retry-after'];
+                        const message = 'LinkedIn rate limit (HTTP 429). Stopping this run and closing the browser. '
+                            + (retryAfter
+                                ? `Server Retry-After: ${retryAfter}. Wait before starting another run.`
+                                : 'Pause scheduled/manual runs and try again later; increasing slowMo alone may not resolve this.');
+                        logger.warn(tag, message);
+                        const error = new Error(message) as Error & { retryAfterMs?: number };
+                        if (retryAfter) {
+                            const seconds = Number(retryAfter);
+                            const delay = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(retryAfter) - Date.now();
+                            if (Number.isFinite(delay)) error.retryAfterMs = Math.max(0, delay);
+                        }
+                        rejectRateLimit(error);
                     }
                     else if (response.status() >= 400) {
                         logger.warn(tag, response.status(), `Error for request ${response.request().url()}`)
@@ -308,14 +332,14 @@ class LinkedinScraper extends Scraper {
                 const searchUrl = this._buildSearchUrl(query.query || "", location, query.options!);
 
                 // Run strategy
-                const runStrategyResult = await this._runStrategy.run(
+                const runStrategyResult = await Promise.race([this._runStrategy.run(
                     this._browser!,
                     page,
                     cdpSession,
                     searchUrl,
                     query,
                     location,
-                );
+                ), rateLimitFailure]);
 
                 // Check if forced exit is required
                 if (runStrategyResult.exit) {
